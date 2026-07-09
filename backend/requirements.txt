@@ -9,3 +9,4 @@ pydantic-settings
 numpy
 alpaca-py
 yfinance
+pyjwt

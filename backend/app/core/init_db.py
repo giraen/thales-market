@@ -9,6 +9,7 @@ def create_tables():
         CREATE TABLE IF NOT EXISTS account_balances (
             id SERIAL PRIMARY KEY,
             user_id VARCHAR(36) UNIQUE NOT NULL,
+            telegram_chat_id VARCHAR(50) UNIQUE,
             unallocated_cash NUMERIC(12, 2) DEFAULT 0.00,
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
         );
