@@ -4,7 +4,6 @@ import pandas as pd
 
 class IndicatorEngine:
     def __init__(self, df: pd.DataFrame):
-        # IMPROVEMENT 1: Deep copy prevents memory leak warnings in pandas
         self.df = df.copy()
 
     def add_all(self):
