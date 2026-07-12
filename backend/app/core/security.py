@@ -9,7 +9,7 @@ from app.core.config import settings
 security = HTTPBearer()
 
 def _get_google_public_keys():
-    resp = requests.get(settings.KID, timeout=5)
+    resp = requests.get(settings.FIREBASE_CHECKER_URL, timeout=5)
     resp.raise_for_status()
     return resp.json()
 
