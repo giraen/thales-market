@@ -15,13 +15,70 @@ class BuyOrderRequest(BaseModel):
     fee_applied: float = Field(ge=0)
     asset_class: str = "STOCK"
 
+class SellOrderRequest(BaseModel):
+    ticker: str
+    quantity: float = Field(gt=0)
+    execution_price: float = Field(gt=0)
+    fee_applied: float = Field(ge=0)
+    asset_class: str = "STOCK"
+
 @router.get("/balance")
-def get_balance():
-    return {"message": "This will return the $150 balance"}
+def get_balance(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
+    cursor = conn.cursor()
+    cursor.execute("SELECT unallocated_cash FROM account_balances WHERE user_id = %s", (user_id,))
+    row = cursor.fetchone()
+    cursor.close()
+
+    balance = float(row['unallocated_cash']) if row else 0.00
+    return {"unallocated_cash": balance}
 
 @router.get("/positions")
-def get_positions():
-    return {"message": "This will return existing stocks"}
+def get_positions(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT
+            ticker,
+            asset_class,
+            SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
+            SUM(CASE WHEN transaction_type = 'BUY' THEN total_cost_basis ELSE -total_cost_basis END) AS net_cost
+        FROM transaction_ledger
+        WHERE user_id = %s
+        GROUP BY ticker, asset_class
+        HAVING SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) > 0
+        ORDER BY ticker
+    """, (user_id,))
+    rows = cursor.fetchall()
+    cursor.close()
+
+    positions = []
+    for row in rows:
+        net_qty = Decimal(str(row['net_quantity']))
+        net_cost = Decimal(str(row['net_cost']))
+        avg_price = net_cost / net_qty if net_qty > 0 else Decimal('0')
+
+        positions.append({
+            "ticker": row['ticker'],
+            "asset_class": row['asset_class'],
+            "quantity_held": float(net_qty),
+            "avg_entry_price": float(avg_price),
+            "total_cost_basis": float(net_cost),
+        })
+    
+    return {"positions": positions}
+
+
+def _resolve_asset(asset_class: str, ticker: str) -> tuple:
+    try:
+        rules = get_rules(asset_class)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ticker = ticker.upper()
+    if not rules.validate_ticker(ticker):
+        raise HTTPException(status_code=400, detail=f"Invalid ticker format for {asset_class}: {ticker}")
+
+    return rules, ticker
+
 
 @router.post("/buy")
 def log_buy(
@@ -29,14 +86,7 @@ def log_buy(
     user_id: str = Depends(get_current_user),
     conn = Depends(get_db)
 ):
-    try:
-        rules = get_rules(order.asset_class)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    ticker = order.ticker.upper()
-    if not rules.validate_ticker(ticker):
-        raise HTTPException(status_code=400, detail=f"Invalid ticker format for {order.asset_class}: {ticker}")
+    rules, ticker = _resolve_asset(order.asset_class, order.ticker())
 
     cursor = conn.cursor()
     try:
@@ -99,6 +149,95 @@ def log_buy(
             "ticker": ticker,
             "quantity_bought": float(quantity),
             "remaining_cash": float(new_balance)
+        }
+
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}")
+    finally:
+        cursor.close()
+
+
+@router.post("/sell")
+def log_sell (
+    order: SellOrderRequest,
+    user_id: str = Depends(get_current_user),
+    conn = Depends(get_db)
+):
+    rules, ticker = _resolve_asset(order.asset_class, order.ticker())
+    
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity
+            FROM transaction_ledger
+            WHERE user_id = %s AND ticker = %s
+        """, (user_id, ticker))
+        row = cursor.fetchone()
+        held_quantity = Decimal(str(row['net_quantity'])) if row and row['net_quantity'] else Decimal('0')
+
+        sell_quantity = rules.quantize_quantity(Decimal(str(order.quantity)))
+        if sell_quantity <= 0:
+            raise HTTPException(status_code=400, detail="Sell quantity rounds to zero at this precision.")
+
+        if sell_quantity > held_quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot sell {sell_quantity} {ticker} — only {held_quantity} held."
+            )
+
+        execution_price = rules.quantize_price(Decimal(str(order.execution_price)))
+        if execution_price <= 0:
+            raise HTTPException(status_code=400, detail="Execution price rounds to zero at this precision.")
+
+        fee = Decimal(str(order.fee_applied))
+        gross_proceeds = sell_quantity * execution_price
+        net_proceeds = gross_proceeds - fee
+
+        if net_proceeds <= 0:
+            raise HTTPException(status_code=400, detail=f"Proceeds must cover the ${fee} fee.")
+
+        cursor.execute("""
+            INSERT INTO account_balances (user_id, unallocated_cash)
+            VALUES (%s, 0.00)
+            ON CONFLICT (user_id) DO NOTHING;
+        """, (user_id,))
+
+        cursor.execute("""
+            SELECT unallocated_cash FROM account_balances
+            WHERE user_id = %s FOR UPDATE
+        """, (user_id,))
+        wallet = cursor.fetchone()
+        current_cash = Decimal(str(wallet['unallocated_cash']))
+        new_balance = current_cash + net_proceeds
+
+        cursor.execute("""
+            INSERT INTO transaction_ledger
+            (user_id, asset_class, ticker, transaction_type, execution_price, quantity, fee_applied, total_cost_basis)
+            VALUES (%s, %s, %s, 'SELL', %s, %s, %s, %s)
+            RETURNING id;
+        """, (user_id, order.asset_class, ticker, execution_price, sell_quantity, fee, net_proceeds))
+        receipt = cursor.fetchone()
+
+        cursor.execute("""
+            UPDATE account_balances
+            SET unallocated_cash = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = %s
+        """, (new_balance, user_id))
+
+        conn.commit()
+
+        return {
+            "status": "success",
+            "receipt_id": receipt['id'],
+            "ticker": ticker,
+            "quantity_sold": float(sell_quantity),
+            "remaining_held": float(held_quantity - sell_quantity),
+            "net_proceeds": float(net_proceeds),
+            "new_balance": float(new_balance)
         }
 
     except HTTPException:
