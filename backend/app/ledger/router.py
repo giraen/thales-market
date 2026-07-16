@@ -5,8 +5,10 @@ from decimal import Decimal
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.rules import get_rules
+from app.ledger.service import get_position
 
 router = APIRouter(prefix="/api/v1/ledger", tags=["Ledger"])
+
 
 class BuyOrderRequest(BaseModel):
     ticker: str
@@ -15,12 +17,14 @@ class BuyOrderRequest(BaseModel):
     fee_applied: float = Field(ge=0)
     asset_class: str = "STOCK"
 
+
 class SellOrderRequest(BaseModel):
     ticker: str
     quantity: float = Field(gt=0)
     execution_price: float = Field(gt=0)
     fee_applied: float = Field(ge=0)
     asset_class: str = "STOCK"
+
 
 @router.get("/balance")
 def get_balance(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
@@ -32,38 +36,28 @@ def get_balance(user_id: str = Depends(get_current_user), conn = Depends(get_db)
     balance = float(row['unallocated_cash']) if row else 0.00
     return {"unallocated_cash": balance}
 
+
 @router.get("/positions")
 def get_positions(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
     cursor = conn.cursor()
-    cursor.execute("""
-        SELECT
-            ticker,
-            asset_class,
-            SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
-            SUM(CASE WHEN transaction_type = 'BUY' THEN total_cost_basis ELSE -total_cost_basis END) AS net_cost
-        FROM transaction_ledger
-        WHERE user_id = %s
-        GROUP BY ticker, asset_class
-        HAVING SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) > 0
-        ORDER BY ticker
-    """, (user_id,))
-    rows = cursor.fetchall()
+    cursor.execute("SELECT DISTINCT ticker, asset_class FROM transaction_ledger WHERE user_id = %s", (user_id,))
+    tickers = cursor.fetchall()
     cursor.close()
 
     positions = []
-    for row in rows:
-        net_qty = Decimal(str(row['net_quantity']))
-        net_cost = Decimal(str(row['net_cost']))
-        avg_price = net_cost / net_qty if net_qty > 0 else Decimal('0')
+    for row in tickers:
+        pos = get_position(conn, user_id, row['ticker'])
 
-        positions.append({
-            "ticker": row['ticker'],
-            "asset_class": row['asset_class'],
-            "quantity_held": float(net_qty),
-            "avg_entry_price": float(avg_price),
-            "total_cost_basis": float(net_cost),
-        })
-    
+        # skip anything fully sold off
+        if pos["net_quantity"] > 0:  
+            positions.append({
+                "ticker": row['ticker'],
+                "asset_class": row['asset_class'],
+                "quantity_held": float(pos["net_quantity"]),
+                "avg_entry_price": float(pos["avg_entry_price"]),
+                "total_cost_basis": float(pos["net_cost"]),
+            })
+
     return {"positions": positions}
 
 
@@ -86,7 +80,7 @@ def log_buy(
     user_id: str = Depends(get_current_user),
     conn = Depends(get_db)
 ):
-    rules, ticker = _resolve_asset(order.asset_class, order.ticker())
+    rules, ticker = _resolve_asset(order.asset_class, order.ticker)
 
     cursor = conn.cursor()
     try:
@@ -167,17 +161,13 @@ def log_sell (
     user_id: str = Depends(get_current_user),
     conn = Depends(get_db)
 ):
-    rules, ticker = _resolve_asset(order.asset_class, order.ticker())
+    rules, ticker = _resolve_asset(order.asset_class, order.ticker)
     
     cursor = conn.cursor()
     try:
-        cursor.execute("""
-            SELECT SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity
-            FROM transaction_ledger
-            WHERE user_id = %s AND ticker = %s
-        """, (user_id, ticker))
-        row = cursor.fetchone()
-        held_quantity = Decimal(str(row['net_quantity'])) if row and row['net_quantity'] else Decimal('0')
+        position = get_position(conn, user_id, ticker)
+        held_quantity = position["net_quantity"]
+        avg_entry_price = position["avg_entry_price"]
 
         sell_quantity = rules.quantize_quantity(Decimal(str(order.quantity)))
         if sell_quantity <= 0:
@@ -199,6 +189,8 @@ def log_sell (
 
         if net_proceeds <= 0:
             raise HTTPException(status_code=400, detail=f"Proceeds must cover the ${fee} fee.")
+        
+        cost_basis_removed = (avg_entry_price * sell_quantity).quantize(Decimal("0.01"))
 
         cursor.execute("""
             INSERT INTO account_balances (user_id, unallocated_cash)
@@ -219,7 +211,7 @@ def log_sell (
             (user_id, asset_class, ticker, transaction_type, execution_price, quantity, fee_applied, total_cost_basis)
             VALUES (%s, %s, %s, 'SELL', %s, %s, %s, %s)
             RETURNING id;
-        """, (user_id, order.asset_class, ticker, execution_price, sell_quantity, fee, net_proceeds))
+        """, (user_id, order.asset_class, ticker, execution_price, sell_quantity, fee, cost_basis_removed))
         receipt = cursor.fetchone()
 
         cursor.execute("""
@@ -237,6 +229,7 @@ def log_sell (
             "quantity_sold": float(sell_quantity),
             "remaining_held": float(held_quantity - sell_quantity),
             "net_proceeds": float(net_proceeds),
+            "realized_pl": float(net_proceeds - cost_basis_removed),
             "new_balance": float(new_balance)
         }
 
