@@ -11,4 +11,3 @@ alpaca-py
 yfinance
 pyjwt
 cryptography
-requests
