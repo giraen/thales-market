@@ -3,7 +3,7 @@ import pandas as pd
 from app.market.lib.market_data import get_market_data
 from app.market.lib.indicators import IndicatorEngine
 from app.market.lib.strategies import check_buy_signals, check_sell_signals
-
+from app.market.lib.glossary import with_meaning
 
 class MarketDataUnavailable(Exception):
     pass
@@ -24,20 +24,22 @@ def _build_snapshot(df, peg_ratio=None):
     """Takes the latest row of computed indicators and formats it for display."""
     latest = df.iloc[-1]
 
+    stop_loss_value = _safe_round(latest['Close'] - (2 * latest['ATR'])) if not pd.isna(latest['ATR']) else None
+
     return {
         "price": _safe_round(latest['Close']),
         "risk_data": {
-            "stop_loss": _safe_round(latest['Close'] - (2 * latest['ATR'])) if not pd.isna(latest['ATR']) else None,
-            "atr": _safe_round(latest['ATR']),
+            "stop_loss": with_meaning("stop_loss", stop_loss_value),
+            "atr": with_meaning("atr", _safe_round(latest['ATR'])),
         },
         "indicators": {
-            "rsi": _safe_round(latest['RSI']),
-            "vwap": _safe_round(latest['VWAP']),
-            "bb_lower": _safe_round(latest.get('BBL')),
-            "bb_upper": _safe_round(latest.get('BBU')),
-            "sma_50": _safe_round(latest['SMA_50']),
-            "sma_200": _safe_round(latest['SMA_200']),
-            "peg_ratio": _safe_round(peg_ratio) if peg_ratio is not None else None,
+            "rsi": with_meaning("rsi", _safe_round(latest['RSI'])),
+            "vwap": with_meaning("vwap", _safe_round(latest['VWAP'])),
+            "bb_lower": with_meaning("bb_lower", _safe_round(latest.get('BBL'))),
+            "bb_upper": with_meaning("bb_upper", _safe_round(latest.get('BBU'))),
+            "sma_50": with_meaning("sma_50", _safe_round(latest['SMA_50'])),
+            "sma_200": with_meaning("sma_200", _safe_round(latest['SMA_200'])),
+            "peg_ratio": with_meaning("peg_ratio", _safe_round(peg_ratio) if peg_ratio is not None else None),
         },
         "last_updated": str(df.index[-1]),
     }
