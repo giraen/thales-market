@@ -52,19 +52,26 @@ def get_market_snapshot(ticker: str):
     or later the scan job) each handle failure differently — a route
     turns this into a 404/422, the scan job will just skip the ticker.
     """
+
+    # gets the market data
     df, peg_ratio = get_market_data(ticker)
     if df is None:
         raise MarketDataUnavailable(f"Could not fetch market data for {ticker}")
-
+    
+    # too little history
     if len(df) < 30:
         raise InsufficientHistory(f"Not enough price history for {ticker} to compute indicators")
 
+    # adds the indicators in the df
     df_with_indicators = IndicatorEngine(df).add_all()
     return df_with_indicators, peg_ratio
 
 
 def run_buy_analysis(ticker: str) -> dict:
+    # get the market data with indicators
     df, peg_ratio = get_market_snapshot(ticker)
+
+    # runs the analysis for the current market data based on the indicators
     result = check_buy_signals(df, peg_ratio)
 
     return {
@@ -78,7 +85,10 @@ def run_buy_analysis(ticker: str) -> dict:
 
 
 def run_sell_analysis(ticker: str, entry_price: float) -> dict:
+    # get the market data with indicators
     df, _ = get_market_snapshot(ticker)
+
+    # runs the analysis for the current market data based on the indicators
     result = check_sell_signals(df, entry_price)
 
     return {

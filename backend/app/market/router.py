@@ -30,13 +30,13 @@ def analyze_sell(
     ticker = ticker.upper()
     resolved_entry_price = entry_price
     
-    # No manual price given -> look up what the user actually paid, on average
+    # No manual price given, then look up what the user actually paid, on average
     if resolved_entry_price is None:
         position = get_position(conn, user_id, ticker)
         if position["net_quantity"] <= 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"No open position in {ticker} to check. Pass ?entry_price= for a hypothetical check."
+                detail=f"No open position in {ticker} to check."
             )
         resolved_entry_price = float(position["avg_entry_price"])
 

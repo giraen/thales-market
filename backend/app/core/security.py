@@ -10,25 +10,33 @@ security = HTTPBearer()
 
 def _get_google_public_keys():
     resp = requests.get(settings.FIREBASE_CHECKER_URL, timeout=5)
+
+    # Raise error if there is an error getting the public key
     resp.raise_for_status()
+
+    # else, return the response
     return resp.json()
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials
     
     try:
+        # get header in the JWT and check if it has the key ID
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         if not kid:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token missing key ID")
 
+        # get the public key
         certs = _get_google_public_keys()
         if kid not in certs:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unrecognized signing key")
 
+        # get the public key from the certificate
         cert = load_pem_x509_certificate(certs[kid].encode())
         public_key = cert.public_key()
 
+        # get the decoded payload
         payload = jwt.decode(
             token,
             public_key,
@@ -37,6 +45,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
             issuer=f"https://securetoken.google.com/{settings.FIREBASE_PROJECT_ID}",
         )
 
+        # get if user_id exists
         user_id: str = payload.get("sub")
         if not user_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token structure")

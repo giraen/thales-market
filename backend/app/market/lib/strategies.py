@@ -87,11 +87,11 @@ def check_sell_signals(df, entry_price, acceptable_loss: float = -0.10):
     # PROFIT TAKING
     if pct_gain >= 0.50:
         response['decision'] = "SELL"
-        response['action'] = "SELL 30% of Position"
+        response['action'] = r"SELL 30% of Position"
         response['reasons'].append(f"Hit Profit Target 2 (+50%). Current: {round(pct_gain*100, 2)}%")
     elif pct_gain >= 0.20:
         response['decision'] = "SELL"
-        response['action'] = "SELL 30% of Position"
+        response['action'] = r"SELL 30% of Position"
         response['reasons'].append(f"Hit Profit Target 1 (+20%). Current: {round(pct_gain*100, 2)}%")
 
     if current_price < latest['SMA_50']:

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.core.rules import get_rules
+from app.ledger.router import _resolve_asset
 
 router = APIRouter(prefix="/api/v1/watchlist", tags=["Watchlist"])
 
@@ -13,6 +14,9 @@ class WatchlistAddRequest(BaseModel):
 
 @router.get("")
 def list_watchlist(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
+    """
+    Gets all the tickers or assets the user wants to watch
+    """
     cursor = conn.cursor()
     cursor.execute("SELECT ticker, asset_class, added_at FROM watchlist WHERE user_id = %s ORDER BY added_at DESC", (user_id,))
     rows = cursor.fetchall()
@@ -25,17 +29,11 @@ def add_to_watchlist(
     user_id: str = Depends(get_current_user),
     conn = Depends(get_db)
 ):
-    try:
-        rules = get_rules(payload.asset_class)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    ticker = payload.ticker.upper()
-    if not rules.validate_ticker(ticker):
-        raise HTTPException(status_code=400, detail=f"Invalid ticker format for {payload.asset_class}: {ticker}")
+    rules, ticker = _resolve_asset(payload.asset_class, payload.ticker)
 
     cursor = conn.cursor()
     try:
+        # skip if ticker is already added to watchlist
         cursor.execute("""
             INSERT INTO watchlist (user_id, ticker, asset_class)
             VALUES (%s, %s, %s)
@@ -51,6 +49,9 @@ def add_to_watchlist(
 
 @router.delete("/{ticker}")
 def remove_from_watchlist(ticker: str, user_id: str = Depends(get_current_user), conn = Depends(get_db)):
+    """
+    Remove a ticker from watchlist. 
+    """
     cursor = conn.cursor()
     try:
         cursor.execute("DELETE FROM watchlist WHERE user_id = %s AND ticker = %s", (user_id, ticker.upper()))

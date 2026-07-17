@@ -36,6 +36,10 @@ ASSET_RULES = {
 }
 
 def get_rules(asset_class: str) -> AssetRules:
+    """
+    Returns the rules for the specific asset class.
+    STOCK, OPTION, and CRYPTO has different price_step, quantity_step, and ticker pattern.
+    """
     if asset_class not in ASSET_RULES:
         raise ValueError(f"Unknown asset class: {asset_class}")
     return ASSET_RULES[asset_class]

@@ -18,13 +18,18 @@ class SettingsUpdateRequest(BaseModel):
 
 @router.get("")
 def get_settings(user_id: str = Depends(get_current_user), conn = Depends(get_db)):
+    # create a connection with db
     cursor = conn.cursor()
+
+    # get user settings
     cursor.execute("SELECT * FROM user_settings WHERE user_id = %s", (user_id,))
     row = cursor.fetchone()
+
+    # disconnect from db
     cursor.close()
 
+    # First time this user hits settings — return defaults, don't force a manual "create" step
     if not row:
-        # First time this user hits settings — return defaults, don't force a manual "create" step
         return {
             "user_id": user_id,
             "telegram_chat_id": None,
@@ -44,8 +49,10 @@ def update_settings(
     if payload.theme is not None and payload.theme not in VALID_THEMES:
         raise HTTPException(status_code=400, detail=f"theme must be one of {VALID_THEMES}")
 
+    # create a db connection
     cursor = conn.cursor()
     try:
+        # skip if user already exists
         cursor.execute("""
             INSERT INTO user_settings (user_id)
             VALUES (%s)

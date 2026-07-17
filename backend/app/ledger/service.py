@@ -7,7 +7,11 @@ def get_position(conn, user_id: str, ticker: str) -> dict:
     BUYs add to quantity/cost, SELLs subtract — the running total is
     the actual position, since we never store "current holdings" directly.
     """
+    
+    # create a connection with db
     cursor = conn.cursor()
+
+    # get the total owned shares and the total cost
     cursor.execute("""
         SELECT
             SUM(CASE WHEN transaction_type = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
@@ -16,6 +20,8 @@ def get_position(conn, user_id: str, ticker: str) -> dict:
         WHERE user_id = %s AND ticker = %s
     """, (user_id, ticker))
     row = cursor.fetchone()
+
+    # close the connection with db
     cursor.close()
 
     net_quantity = Decimal(str(row['net_quantity'])) if row and row['net_quantity'] else Decimal('0')

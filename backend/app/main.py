@@ -18,7 +18,7 @@ app.include_router(ledger_router.router)
 app.include_router(market_router.router)
 app.include_router(settings_router.router)
 app.include_router(watchlist_router.router)
+
 @app.get('/')
 def check_status():
     return {"status": "ok"}
-
