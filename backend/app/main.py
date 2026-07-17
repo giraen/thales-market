@@ -14,6 +14,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Thales Market Signaler", lifespan=lifespan)
 
+# Add routes
 app.include_router(ledger_router.router)
 app.include_router(market_router.router)
 app.include_router(settings_router.router)
