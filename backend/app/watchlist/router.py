@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.core.rules import get_rules
 from app.ledger.router import _resolve_asset
 
 router = APIRouter(prefix="/api/v1/watchlist", tags=["Watchlist"])
