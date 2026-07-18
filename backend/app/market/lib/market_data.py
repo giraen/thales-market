@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 
-def get_market_data(ticker: str, days: int = 365):
+def get_market_data(ticker: str, days: int = 365, fetch_peg: bool = True):
     try:
         client = StockHistoricalDataClient(settings.ALPACA_API_KEY, settings.ALPACA_SECRET_KEY)
 
@@ -41,10 +41,12 @@ def get_market_data(ticker: str, days: int = 365):
         print(f"Alpaca API Error: {e}")
         return None, None
     
-    try:
-        stock = yf.Ticker(ticker)
-        peg = stock.info.get('pegRatio') or stock.info.get('trailingPegRatio')
-    except Exception:
-        peg = None
+    peg = None
+    if fetch_peg:
+        try:
+            stock = yf.Ticker(ticker)
+            peg = stock.info.get('pegRatio') or stock.info.get('trailingPegRatio')
+        except Exception:
+            peg = None
 
     return df, peg
