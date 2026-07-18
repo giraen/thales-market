@@ -1,17 +1,14 @@
-import psycopg2
-from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta, timezone
 
-from app.core.config import settings
 from app.ledger.service import get_position
 from app.market.service import get_market_snapshot, MarketDataUnavailable, InsufficientHistory
 from app.market.lib.strategies import check_buy_signals, check_sell_signals
-from app.core.database import get_db
+from app.core.database import create_connection
 
 PEG_CACHE_MAX_AGE = timedelta(hours=24)
 
 def run_scan():
-    conn = get_db()
+    conn = create_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
