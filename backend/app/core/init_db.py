@@ -50,6 +50,12 @@ def create_tables():
             ticker VARCHAR(20) NOT NULL,
             asset_class VARCHAR(10) CHECK (asset_class IN ('STOCK', 'OPTION', 'CRYPTO')) DEFAULT 'STOCK',
             added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            last_buy_decision VARCHAR(10),
+            last_buy_notified_at TIMESTAMP WITH TIME ZONE,
+            last_sell_decision VARCHAR(10),
+            last_sell_notified_at TIMESTAMP WITH TIME ZONE,
+            cached_peg_ratio NUMERIC(10, 4),
+            peg_fetched_at TIMESTAMP WITH TIME ZONE,
             UNIQUE(user_id, ticker)
         );
     """)
