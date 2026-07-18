@@ -45,16 +45,15 @@ def _build_snapshot(df, peg_ratio=None):
     }
 
 
-def get_market_snapshot(ticker: str):
+def get_market_snapshot(ticker: str, cached_peg: float = None):
     """
     Fetches price history for a ticker and runs every indicator on it.
     Raises instead of returning None/error codes, since callers (a route,
     or later the scan job) each handle failure differently — a route
     turns this into a 404/422, the scan job will just skip the ticker.
     """
-
     # gets the market data
-    df, peg_ratio = get_market_data(ticker)
+    df, peg_ratio = get_market_data(ticker=ticker, fetch_peg=(cached_peg is None))
     if df is None:
         raise MarketDataUnavailable(f"Could not fetch market data for {ticker}")
     
